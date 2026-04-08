@@ -70,6 +70,39 @@ export async function notifyTaskAssignee(params: AssignParams) {
   await sendSafe(assignee.email, subject, html);
 }
 
+/** Email the creator when someone other than the creator assigns the task to themselves. */
+export async function notifyCreatorWhenAssigneeClaimedSelf(params: {
+  creatorId: string;
+  assignerId: string;
+  assignerName: string;
+  assignerEmail: string;
+  assigneeId: string;
+  previousAssigneeId: string | null;
+  taskTitle: string;
+}) {
+  const { creatorId, assignerId, assignerName, assignerEmail, assigneeId, previousAssigneeId, taskTitle } = params;
+
+  if (!assigneeId || assigneeId !== assignerId) return;
+  if (assignerId === creatorId) return;
+  if (previousAssigneeId === assigneeId) return;
+
+  const creator = await findUserById(creatorId);
+  if (!creator?.email) return;
+
+  const g = escapeHtml((creator.name && creator.name.trim()) || "there");
+  const who = escapeHtml(assignerName);
+  const whoEmail = escapeHtml(assignerEmail);
+  const subject = `Task claimed: ${taskTitle}`;
+  const html = `
+    <p>Hi ${g},</p>
+    <p><strong>${who}</strong> (${whoEmail}) assigned themselves to your task:</p>
+    <p><strong>${escapeHtml(taskTitle)}</strong></p>
+    ${dashboardLinkHtml()}
+  `;
+
+  await sendSafe(creator.email, subject, html);
+}
+
 /** After task create: notify assignee if any (not self); notify creator if unassigned or self-assigned. */
 export async function notifyTaskCreated(params: {
   creatorId: string;
@@ -129,24 +162,21 @@ export async function notifyTaskCreated(params: {
   await sendSafe(creator.email, subject, html);
 }
 
-/** When status changes, email creator and/or assignee except the user who updated. */
+/** When status changes, email both creator and assignee (each once), including whoever made the update. */
 export async function notifyTaskStatusChanged(params: {
   taskTitle: string;
   fromStatus: string;
   toStatus: string;
-  updatedById: string;
   updatedByName: string;
   updatedByEmail: string;
   creatorId: string;
   assigneeId: string | null;
 }) {
-  const { taskTitle, fromStatus, toStatus, updatedById, updatedByName, updatedByEmail, creatorId, assigneeId } =
-    params;
+  const { taskTitle, fromStatus, toStatus, updatedByName, updatedByEmail, creatorId, assigneeId } = params;
 
   const recipientIds = new Set<string>();
   recipientIds.add(creatorId);
   if (assigneeId) recipientIds.add(assigneeId);
-  recipientIds.delete(updatedById);
 
   const actorLine = `<p>Updated by <strong>${escapeHtml(updatedByName)}</strong> (${escapeHtml(updatedByEmail)}).</p>`;
 
@@ -159,6 +189,39 @@ export async function notifyTaskStatusChanged(params: {
     const html = `
       <p>Hi ${g},</p>
       <p>The status of <strong>${escapeHtml(taskTitle)}</strong> changed from <strong>${escapeHtml(fromStatus)}</strong> to <strong>${escapeHtml(toStatus)}</strong>.</p>
+      ${actorLine}
+      ${dashboardLinkHtml()}
+    `;
+
+    await sendSafe(u.email, subject, html);
+  }
+}
+
+/** After delete: notify creator and assignee (deduped if same person). */
+export async function notifyTaskDeleted(params: {
+  taskTitle: string;
+  creatorId: string;
+  assigneeId: string | null;
+  deletedByName: string;
+  deletedByEmail: string;
+}) {
+  const { taskTitle, creatorId, assigneeId, deletedByName, deletedByEmail } = params;
+
+  const recipientIds = new Set<string>();
+  recipientIds.add(creatorId);
+  if (assigneeId) recipientIds.add(assigneeId);
+
+  const actorLine = `<p>Deleted by <strong>${escapeHtml(deletedByName)}</strong> (${escapeHtml(deletedByEmail)}).</p>`;
+
+  for (const uid of recipientIds) {
+    const u = await findUserById(uid);
+    if (!u?.email) continue;
+
+    const g = escapeHtml((u.name && u.name.trim()) || "there");
+    const subject = `Task deleted: ${taskTitle}`;
+    const html = `
+      <p>Hi ${g},</p>
+      <p>The task <strong>${escapeHtml(taskTitle)}</strong> has been deleted.</p>
       ${actorLine}
       ${dashboardLinkHtml()}
     `;

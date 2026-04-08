@@ -69,6 +69,13 @@ function canEditTask(task: Task, userId: string | null): boolean {
   return Boolean(task.assignedUser && task.assignedUser === userId);
 }
 
+/** Task you created or that is assigned to you — highlighted in the board/list. */
+function taskInvolvesMe(task: Task, userId: string | null): boolean {
+  if (!userId) return false;
+  if (task.createdBy === userId) return true;
+  return Boolean(task.assignedUser && task.assignedUser === userId);
+}
+
 function assignUsersForSelect(users: AssignableUser[], selfId: string | null) {
   const copy = [...users];
   copy.sort((a, b) => {
@@ -106,7 +113,7 @@ export default function DashboardPage() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<TaskStatus | "">("");
   const [priority, setPriority] = useState<TaskPriority | "">("");
-  const [mine, setMine] = useState(true);
+  const [mine, setMine] = useState(false);
   const [sortBy, setSortBy] = useState<TaskSort>("created_desc");
   const [filterAssignee, setFilterAssignee] = useState<string>("");
   const [filterCreatedBy, setFilterCreatedBy] = useState<string>("");
@@ -571,7 +578,7 @@ export default function DashboardPage() {
               </select>
               <label
                 className="ml-2 flex max-w-[14rem] cursor-pointer items-center gap-2 text-sm text-slate-600 sm:max-w-none"
-                title="Tasks you created or that are assigned to you"
+                title="When checked, only tasks you created or that are assigned to you. When unchecked, all tasks are shown and yours are highlighted."
               >
                 <input
                   type="checkbox"
@@ -579,7 +586,7 @@ export default function DashboardPage() {
                   checked={mine}
                   onChange={(e) => setMine(e.target.checked)}
                 />
-                <span className="leading-tight">My tasks (created or assigned to me)</span>
+                <span className="leading-tight">Only my tasks</span>
               </label>
             </div>
 
@@ -747,6 +754,7 @@ export default function DashboardPage() {
                           key={t._id}
                           task={t}
                           currentUserId={currentUserId}
+                          involvesMe={taskInvolvesMe(t, currentUserId)}
                           creatorLabel={creatorLabelForTask(t, currentUserId, assigneeLabelById)}
                           assigneeLabel={
                             t.assignedUser
@@ -780,10 +788,18 @@ export default function DashboardPage() {
                   </div>
                 ) : (
                   tasks.map((t) => (
-                    <div key={t._id} className="p-4 hover:bg-slate-50 transition-colors">
+                    <div
+                      key={t._id}
+                      className={`p-4 transition-colors ${
+                        taskInvolvesMe(t, currentUserId)
+                          ? "border-l-[3px] border-l-indigo-500 bg-indigo-50/45 hover:bg-indigo-50/65"
+                          : "border-l-[3px] border-l-transparent hover:bg-slate-50"
+                      }`}
+                    >
                       <TaskCard
                         task={t}
                         currentUserId={currentUserId}
+                        involvesMe={taskInvolvesMe(t, currentUserId)}
                         creatorLabel={creatorLabelForTask(t, currentUserId, assigneeLabelById)}
                         assigneeLabel={
                           t.assignedUser ? assigneeLabelById.get(t.assignedUser) ?? "Unknown user" : null
@@ -1132,6 +1148,7 @@ function badgeForStatus(s: TaskStatus) {
 function TaskCard({
   task,
   currentUserId,
+  involvesMe,
   creatorLabel,
   assigneeLabel,
   canEdit,
@@ -1145,6 +1162,8 @@ function TaskCard({
 }: {
   task: Task;
   currentUserId: string | null;
+  /** You created this task or it is assigned to you — stronger visual emphasis. */
+  involvesMe: boolean;
   creatorLabel: string;
   assigneeLabel: string | null;
   canEdit: boolean;
@@ -1180,9 +1199,18 @@ function TaskCard({
       ? "Assigned to you"
       : `Assigned to ${assigneeLabel ?? "Unknown user"}`;
 
+  const kanbanMine =
+    "border-indigo-200 bg-gradient-to-br from-indigo-50/80 to-white ring-1 ring-indigo-400/30 shadow-indigo-900/5";
+
   return (
     <div
-      className={`group relative flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md ${listMode ? "border-none shadow-none hover:shadow-none sm:flex-row sm:items-start sm:justify-between sm:gap-4" : ""}`}
+      className={`group relative flex flex-col gap-3 rounded-xl p-4 transition-shadow ${
+        listMode
+          ? "border-0 bg-transparent shadow-none ring-0 hover:shadow-none sm:flex-row sm:items-start sm:justify-between sm:gap-4"
+          : involvesMe
+            ? `border shadow-sm hover:shadow-md ${kanbanMine}`
+            : "border border-slate-200 bg-white shadow-sm hover:shadow-md"
+      }`}
     >
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         <div className={`flex gap-2 ${listMode ? "flex-wrap items-center" : "items-start justify-between"}`}>
@@ -1192,6 +1220,11 @@ function TaskCard({
           >
             {task.title}
           </h4>
+          {involvesMe ? (
+            <span className="inline-flex shrink-0 items-center rounded-md bg-indigo-600/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-800 ring-1 ring-inset ring-indigo-500/25">
+              Yours
+            </span>
+          ) : null}
           {listMode && (
             <span className={`inline-flex shrink-0 items-center rounded-md px-2 py-1 text-xs font-medium ${badgeForStatus(task.status)}`}>
               {task.status}

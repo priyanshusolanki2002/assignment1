@@ -5,8 +5,10 @@ import { findUserById } from "../auth/userRepo.js";
 import { requireAuth, type AuthedRequest } from "../auth/middleware.js";
 import {
   enqueueTaskEmails,
+  notifyCreatorWhenAssigneeClaimedSelf,
   notifyTaskAssignee,
   notifyTaskCreated,
+  notifyTaskDeleted,
   notifyTaskStatusChanged
 } from "./taskEmails.js";
 import { TaskModel, TASK_PRIORITIES, TASK_STATUSES, type TaskPriority, type TaskStatus } from "./Task.js";
@@ -330,16 +332,25 @@ tasksRouter.patch("/:id", requireAuth, async (req: AuthedRequest, res) => {
   const assigner = await findUserById(req.user!.id);
   if (assigner && nextAssigned) {
     const assignerName = (assigner.name && assigner.name.trim()) || assigner.email;
-    enqueueTaskEmails(() =>
-      notifyTaskAssignee({
+    enqueueTaskEmails(async () => {
+      await notifyTaskAssignee({
         assignerId: req.user!.id,
         assignerName,
         assignerEmail: assigner.email,
         assigneeId: nextAssigned,
         previousAssigneeId: prevAssigned,
         taskTitle: task.title
-      })
-    );
+      });
+      await notifyCreatorWhenAssigneeClaimedSelf({
+        creatorId,
+        assignerId: req.user!.id,
+        assignerName,
+        assignerEmail: assigner.email,
+        assigneeId: nextAssigned,
+        previousAssigneeId: prevAssigned,
+        taskTitle: task.title
+      });
+    });
   }
 
   if (assigner && updates.status !== undefined && task.status !== prevStatus) {
@@ -350,7 +361,6 @@ tasksRouter.patch("/:id", requireAuth, async (req: AuthedRequest, res) => {
         taskTitle: task.title,
         fromStatus: prevStatus,
         toStatus: task.status as string,
-        updatedById: req.user!.id,
         updatedByName: assignerName,
         updatedByEmail: assigner.email,
         creatorId,
@@ -368,7 +378,22 @@ tasksRouter.delete("/:id", requireAuth, async (req: AuthedRequest, res) => {
 
   const uid = req.user!.id;
   const deleted = await TaskModel.findOneAndDelete({ _id: id, createdBy: uid }).lean();
-  if (deleted) return res.json({ ok: true });
+  if (deleted) {
+    const deleter = await findUserById(uid);
+    if (deleter) {
+      const deletedByName = (deleter.name && deleter.name.trim()) || deleter.email;
+      enqueueTaskEmails(() =>
+        notifyTaskDeleted({
+          taskTitle: deleted.title,
+          creatorId: String(deleted.createdBy),
+          assigneeId: deleted.assignedUser ? String(deleted.assignedUser) : null,
+          deletedByName,
+          deletedByEmail: deleter.email
+        })
+      );
+    }
+    return res.json({ ok: true });
+  }
 
   const exists = await TaskModel.findById(id).lean();
   if (!exists) return res.status(404).json({ error: "Task not found" });
