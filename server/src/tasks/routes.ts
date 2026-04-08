@@ -3,7 +3,12 @@ import mongoose from "mongoose";
 
 import { findUserById } from "../auth/userRepo.js";
 import { requireAuth, type AuthedRequest } from "../auth/middleware.js";
-import { notifyTaskAssignee, notifyTaskCreated, notifyTaskStatusChanged } from "./taskEmails.js";
+import {
+  enqueueTaskEmails,
+  notifyTaskAssignee,
+  notifyTaskCreated,
+  notifyTaskStatusChanged
+} from "./taskEmails.js";
 import { TaskModel, TASK_PRIORITIES, TASK_STATUSES, type TaskPriority, type TaskStatus } from "./Task.js";
 
 export const tasksRouter = Router();
@@ -52,13 +57,15 @@ tasksRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
   const assigner = await findUserById(createdBy);
   if (assigner) {
     const assignerName = (assigner.name && assigner.name.trim()) || assigner.email;
-    await notifyTaskCreated({
-      creatorId: createdBy,
-      creatorName: assignerName,
-      creatorEmail: assigner.email,
-      assigneeId: assignedUser,
-      title
-    });
+    enqueueTaskEmails(() =>
+      notifyTaskCreated({
+        creatorId: createdBy,
+        creatorName: assignerName,
+        creatorEmail: assigner.email,
+        assigneeId: assignedUser,
+        title
+      })
+    );
   }
 
   return res.status(201).json({ task });
@@ -323,29 +330,33 @@ tasksRouter.patch("/:id", requireAuth, async (req: AuthedRequest, res) => {
   const assigner = await findUserById(req.user!.id);
   if (assigner && nextAssigned) {
     const assignerName = (assigner.name && assigner.name.trim()) || assigner.email;
-    await notifyTaskAssignee({
-      assignerId: req.user!.id,
-      assignerName,
-      assignerEmail: assigner.email,
-      assigneeId: nextAssigned,
-      previousAssigneeId: prevAssigned,
-      taskTitle: task.title
-    });
+    enqueueTaskEmails(() =>
+      notifyTaskAssignee({
+        assignerId: req.user!.id,
+        assignerName,
+        assignerEmail: assigner.email,
+        assigneeId: nextAssigned,
+        previousAssigneeId: prevAssigned,
+        taskTitle: task.title
+      })
+    );
   }
 
   if (assigner && updates.status !== undefined && task.status !== prevStatus) {
     const assigneeId = task.assignedUser ? String(task.assignedUser) : null;
     const assignerName = (assigner.name && assigner.name.trim()) || assigner.email;
-    await notifyTaskStatusChanged({
-      taskTitle: task.title,
-      fromStatus: prevStatus,
-      toStatus: task.status as string,
-      updatedById: req.user!.id,
-      updatedByName: assignerName,
-      updatedByEmail: assigner.email,
-      creatorId,
-      assigneeId
-    });
+    enqueueTaskEmails(() =>
+      notifyTaskStatusChanged({
+        taskTitle: task.title,
+        fromStatus: prevStatus,
+        toStatus: task.status as string,
+        updatedById: req.user!.id,
+        updatedByName: assignerName,
+        updatedByEmail: assigner.email,
+        creatorId,
+        assigneeId
+      })
+    );
   }
 
   return res.json({ task });

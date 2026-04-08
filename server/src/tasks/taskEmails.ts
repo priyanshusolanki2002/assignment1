@@ -25,6 +25,14 @@ async function sendSafe(to: string, subject: string, html: string) {
   }
 }
 
+/**
+ * Run notification work without blocking the HTTP handler (SMTP can hang or be slow in production).
+ * Errors are logged only; they never affect the API response.
+ */
+export function enqueueTaskEmails(run: () => Promise<void>): void {
+  void run().catch((err) => console.error("[tasks] background email error:", err));
+}
+
 type AssignParams = {
   assignerId: string;
   assignerName: string;
